@@ -1,6 +1,6 @@
 import express from "express";
-import { becomeProvider,getAllProviders,getProviderProfileById,updateProviderProfile } from "../controllers/providerProfile.controller.js";
-import  {protect}  from "../middlewares/user.middleware.js"; // Assuming this is your auth middleware
+import { becomeProvider,getAllProviders,getProviderProfileById,updateProviderProfile ,getProviderDashboardStats} from "../controllers/providerProfile.controller.js";
+import  {isProvider, protect}  from "../middlewares/user.middleware.js"; // Assuming this is your auth middleware
 import upload from "../middlewares/multer.js";
  // The path to your multer config file
 
@@ -32,6 +32,13 @@ providerProfileRouter.get(
 providerProfileRouter.get(
     "/get-provider/:id",
     getProviderProfileById
+);
+
+providerProfileRouter.get(
+    "/provider-dashboard-stats",
+    protect,
+    isProvider,
+    getProviderDashboardStats
 );
 
 export default providerProfileRouter;

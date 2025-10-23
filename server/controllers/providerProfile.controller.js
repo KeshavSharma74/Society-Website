@@ -2,6 +2,7 @@ import User from "../models/user.model.js";
 import ProviderProfile from "../models/providerProfile.model.js";
 import cloudinary from "../config/cloudinary.js"; // Correct import of your cloudinary config
 import streamifier from "streamifier"; // We need this small utility
+import Booking from "../models/booking.model.js";
 
 /**
  * A helper function to upload a buffer to Cloudinary
@@ -228,5 +229,61 @@ const getAllProviders = async (req, res) => {
     }
 };
 
+const getProviderDashboardStats = async (req, res) => {
+    try {
+        const providerUserId = req.user._id;
+
+        // 1. Find the provider's profile
+        const providerProfile = await ProviderProfile.findOne({ user: providerUserId });
+        if (!providerProfile) {
+            return res.status(404).json({ success: false, message: "Provider profile not found." });
+        }
+        const providerProfileId = providerProfile._id;
+
+        // 2. Get status counts and total bookings in one query
+        const bookingStats = await Booking.aggregate([
+            { $match: { provider: providerProfileId } },
+            { $group: { _id: "$status", count: { $sum: 1 } } }
+        ]);
+
+        // Format the stats into a clean object
+        const statusCounts = {
+            pending: 0,
+            accepted: 0,
+            rejected: 0,
+            completed: 0,
+            cancelled: 0
+        };
+        let totalBookings = 0;
+        
+        bookingStats.forEach(stat => {
+            if (statusCounts.hasOwnProperty(stat._id)) {
+                statusCounts[stat._id] = stat.count;
+            }
+            totalBookings += stat.count;
+        });
+
+        // 3. Get 5 Recent Bookings
+        const recentBookings = await Booking.find({ provider: providerProfileId })
+            .populate('customer', 'name profileImage')
+            .sort({ createdAt: -1 })
+            .limit(5);
+
+        // 4. Send the final response
+        return res.status(200).json({
+            success: true,
+            data: {
+                totalBookings,
+                statusCounts,
+                recentBookings
+            }
+        });
+
+    } catch (error) {
+        console.error("Error in getProviderDashboardStats controller:", error.message);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
 // Make sure to export it
-export { becomeProvider, updateProviderProfile,getProviderProfileById,getAllProviders };
+export { becomeProvider, updateProviderProfile,getProviderProfileById,getAllProviders,getProviderDashboardStats };

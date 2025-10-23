@@ -15,7 +15,6 @@ const bookingRouter = express.Router();
 bookingRouter.post(
     "/create-booking/:providerId",
     protect,
-    isCustomer, // Only customers can create bookings
     createBooking
 );
 
@@ -25,7 +24,6 @@ bookingRouter.post(
 bookingRouter.get(
     "/my-bookings",
     protect,
-    isCustomer, // Only customers can see their own bookings
     getCustomerBookings
 );
 

@@ -176,7 +176,6 @@ const updateBookingStatus = async (req, res) => {
     }
 };
 
-
 export {
     createBooking,
     getCustomerBookings,
