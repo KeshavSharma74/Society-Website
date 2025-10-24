@@ -9,44 +9,32 @@ import { protect, isCustomer, isProvider } from "../middlewares/user.middleware.
 
 const bookingRouter = express.Router();
 
-// @route   POST /api/bookings/
-// @desc    Create a new booking
-// @access  Private (Customer)
 bookingRouter.post(
-    "/create-booking/:providerId",
+    "/:providerId", // This path is better than "/create-booking/:providerId"
     protect,
+    isCustomer, // <-- GOOD: Only customers can create bookings
     createBooking
 );
 
-// @route   GET /api/bookings/my-bookings
-// @desc    Get all bookings for the logged-in customer
-// @access  Private (Customer)
 bookingRouter.get(
     "/my-bookings",
     protect,
+    isCustomer, // <-- GOOD: Only customers see their bookings
     getCustomerBookings
 );
 
-// @route   GET /api/bookings/my-requests
-// @desc    Get all booking requests for the logged-in provider
-// @access  Private (Provider)
 bookingRouter.get(
     "/my-requests",
     protect,
-    isProvider, // Only providers can see their requests
+    isProvider, // GOOD: Only providers can see their requests
     getProviderBookings
 );
 
-// @route   PUT /api/bookings/update-status/:id
-// @desc    Update a booking's status
-// @access  Private ( Provider)
 bookingRouter.put(
     "/update-status/:id",
     protect,
-    isProvider, 
+    // REMOVED 'isProvider'. The controller handles both roles.
     updateBookingStatus
 );
-
-
 
 export default bookingRouter;

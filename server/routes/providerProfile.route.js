@@ -1,44 +1,58 @@
 import express from "express";
-import { becomeProvider,getAllProviders,getProviderProfileById,updateProviderProfile ,getProviderDashboardStats} from "../controllers/providerProfile.controller.js";
-import  {isProvider, protect}  from "../middlewares/user.middleware.js"; // Assuming this is your auth middleware
+import {
+    becomeProvider,
+    updateProviderProfile,
+    addServiceOffering,      // <-- NEW
+    deleteServiceOffering,     // <-- NEW
+    getAllProviders,
+    getProviderById,
+    getProviderDashboardStats  // <-- You had this, but it needs to be imported
+} from "../controllers/providerProfile.controller.js";
+import { protect, isProvider } from "../middlewares/user.middleware.js";
 import upload from "../middlewares/multer.js";
- // The path to your multer config file
 
-const providerProfileRouter = express.Router();
+const router = express.Router();
 
-// --- Route to Become a Provider ---
-// This route is protected, meaning the user must be logged in.
-// It uses 'upload.array()' to accept multiple files from a field named 'portfolioImages'.
-// We've set a limit of 10 images here, but you can change it.
-providerProfileRouter.post(
+// --- Public Routes ---
+router.get("/", getAllProviders);
+router.get("/:id", getProviderById); // Renamed from "/get-provider/:id" for simplicity
+
+// --- Private Provider Routes ---
+router.post(
     "/become-provider",
     protect,
-    upload.array("portfolioImages", 10), 
-    becomeProvider
+    becomeProvider // Does NOT upload images anymore
 );
 
-providerProfileRouter.put(
-    "/update-provider-profile",
+router.put(
+    "/", // Renamed from "/update-provider-profile"
     protect,
-    upload.array("portfolioImages", 10), // User can upload new images to this same field
-    updateProviderProfile
+    isProvider,
+    updateProviderProfile // Does NOT upload images anymore
 );
 
-providerProfileRouter.get(
-    "/get-all-providers",
-    getAllProviders
+// --- Routes for Managing Services ---
+router.post(
+    "/service",
+    protect,
+    isProvider,
+    upload.array("portfolioImages", 10), // Images are for the SERVICE
+    addServiceOffering
 );
 
-providerProfileRouter.get(
-    "/get-provider/:id",
-    getProviderProfileById
+router.delete(
+    "/service/:serviceId",
+    protect,
+    isProvider,
+    deleteServiceOffering
 );
 
-providerProfileRouter.get(
-    "/provider-dashboard-stats",
+// --- Provider Dashboard Route ---
+router.get(
+    "/dashboard/stats", // Changed path to be more clear
     protect,
     isProvider,
     getProviderDashboardStats
 );
 
-export default providerProfileRouter;
+export default router;

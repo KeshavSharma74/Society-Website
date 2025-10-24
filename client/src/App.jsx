@@ -11,16 +11,24 @@ import { useDispatch } from 'react-redux'
 import { useEffect } from 'react'
 import { checkAuth } from './features/authSlice'
 import { Toaster } from 'react-hot-toast'
+import HomePageLoader from './components/loaders/HomePageLoader'
+import { useSelector } from 'react-redux'
 
 const App = () => {
 
   const dispatch=useDispatch();
 
+  const isCheckingAuth = useSelector((state) => state.auth.isCheckingAuth);
+
+  // const isCheckingAuth = true; 
+
   useEffect(() => {
-    // console.log('App: Starting auth check...')
     dispatch(checkAuth())
   }, [dispatch])
 
+  if(isCheckingAuth){
+    return < HomePageLoader></HomePageLoader>;
+  }
 
   return (
     <div className=''>

@@ -1,234 +1,205 @@
 import User from "../models/user.model.js";
 import ProviderProfile from "../models/providerProfile.model.js";
-import cloudinary from "../config/cloudinary.js"; // Correct import of your cloudinary config
-import streamifier from "streamifier"; // We need this small utility
-import Booking from "../models/booking.model.js";
+import ServiceOffering from "../models/serviceOffering.model.js";
+import Booking from "../models/booking.model.js"; // <-- You need to import Booking model here for dashboard stats
+import cloudinary from "../config/cloudinary.js";
+import streamifier from "streamifier";
 
-/**
- * A helper function to upload a buffer to Cloudinary
- * @param {Buffer} buffer - The image buffer from req.file
- * @returns {Promise<string>} - A promise that resolves with the secure URL
- */
+// --- (Helper functions for Cloudinary) ---
 const uploadBufferToCloudinary = (buffer) => {
     return new Promise((resolve, reject) => {
-        // Create an upload stream
         const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: "portfolio_images" }, // Optional: organize uploads in a folder
+            { folder: "service_offerings" }, // Make sure your Cloudinary folder is set
             (error, result) => {
-                if (error) {
-                    return reject(error);
-                }
-                resolve(result.secure_url);
+                if (error) return reject(error);
+                resolve({ url: result.secure_url, public_id: result.public_id });
             }
         );
-
-        // Pipe the buffer to the stream
         streamifier.createReadStream(buffer).pipe(uploadStream);
     });
 };
 
-const becomeProvider = async (req, res) => {
+const deleteFromCloudinary = (public_id) => {
+    return new Promise((resolve, reject) => {
+        cloudinary.uploader.destroy(public_id, (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+        });
+    });
+};
+
+
+// --- Provider Profile Controllers ---
+
+/**
+ * @description Create a basic provider profile (Step 1 of becoming a provider)
+ * @route POST /api/provider-profile/become-provider
+ * @access Private (Auth User)
+ */
+ const becomeProvider = async (req, res) => {
     try {
-        const userId = req.user._id; // From your protectRoute middleware
+        const userId = req.user._id;
+        const { bio, experience } = req.body;
 
-        // 1. Get form data from the body
-        const { bio, experience, serviceCategories } = req.body;
-
-        // 2. Check for portfolio images (required by your model)
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "Portfolio images are required."
-            });
+        if (!bio || experience === undefined) {
+            return res.status(400).json({ success: false, message: "Bio and experience are required." });
         }
 
-        // 3. Check if user is already a provider
         const existingProfile = await ProviderProfile.findOne({ user: userId });
         if (existingProfile) {
-            return res.status(400).json({
-                success: false,
-                message: "You are already a provider."
-            });
+            return res.status(400).json({ success: false, message: "You are already a provider." });
         }
 
-        // 4. Upload all images to Cloudinary in parallel
-        // We map each file to our new uploadBufferToCloudinary helper
-        const uploadPromises = req.files.map(file => uploadBufferToCloudinary(file.buffer));
-        
-        // We wait for all promises to resolve
-        const portfolioImageUrls = await Promise.all(uploadPromises);
-
-        if (!portfolioImageUrls || portfolioImageUrls.length === 0) {
-             return res.status(500).json({
-                success: false,
-                message: "Failed to upload images, please try again."
-            });
-        }
-
-        // 5. Create the new ProviderProfile in the database
         const newProfile = await ProviderProfile.create({
             user: userId,
             bio,
-            experience,
-            serviceCategories,
-            portfolioImages: portfolioImageUrls // Save the array of URLs
+            experience
         });
 
-        // 6. Update the User's role from 'customer' to 'provider'
-        const updatedUser = await User.findByIdAndUpdate(
-            userId,
-            { role: "provider" },
-            { new: true }
-        ).select("-password"); // Send back the updated user (without password)
+        // Update the user's role to 'provider'
+        await User.findByIdAndUpdate(userId, { role: "provider" });
 
         return res.status(201).json({
             success: true,
-            message: "Congratulations! You are now a provider.",
-            user: updatedUser,
+            message: "Congratulations! You are now a provider. Proceed to add your services.",
             profile: newProfile
         });
-
     } catch (error) {
-        console.log("Error in becomeProvider controller:", error);
-        
-        // Handle Mongoose validation errors
-        if (error.name === 'ValidationError') {
-             return res.status(400).json({
-                success: false,
-                message: error.message,
-            });
-        }
-        
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error: " + error.message,
-        });
+        console.error("Error in becomeProvider:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-const updateProviderProfile = async (req, res) => {
+/**
+ * @description Update a provider's basic profile (bio, experience)
+ * @route PUT /api/provider-profile/
+ * @access Private (Provider)
+ */
+ const updateProviderProfile = async (req, res) => {
     try {
-        const userId = req.user._id; // From your protectRoute middleware
-        
-        // 1. Find the provider profile
-        const profile = await ProviderProfile.findOne({ user: userId });
+        const userId = req.user._id;
+        const { bio, experience } = req.body;
+
+        const profile = await ProviderProfile.findOneAndUpdate(
+            { user: userId },
+            { bio, experience },
+            { new: true, runValidators: true }
+        );
+
         if (!profile) {
-            return res.status(404).json({
-                success: false,
-                message: "Provider profile not found."
-            });
+            return res.status(404).json({ success: false, message: "Provider profile not found." });
         }
-
-        // 2. Get text data from the body
-        const { bio, experience, serviceCategories } = req.body;
-
-        // 3. Update text fields if they were provided
-        if (bio) profile.bio = bio;
-        if (experience) profile.experience = experience;
-        
-        // Note: For serviceCategories, you might want to replace the whole array
-        // If serviceCategories is sent as an empty array, it will clear them.
-        if (serviceCategories) {
-            profile.serviceCategories = serviceCategories;
-        }
-
-        // 4. Check for and upload new images
-        if (req.files && req.files.length > 0) {
-            // Upload all new images to Cloudinary
-            const uploadPromises = req.files.map(file => uploadBufferToCloudinary(file.buffer));
-            const newImageUrls = await Promise.all(uploadPromises);
-
-            // Add the new image URLs to the existing array
-            profile.portfolioImages.push(...newImageUrls);
-        }
-
-        // 5. Save the updated profile
-        const updatedProfile = await profile.save();
 
         return res.status(200).json({
             success: true,
             message: "Profile updated successfully.",
-            profile: updatedProfile
+            profile
         });
-
     } catch (error) {
-        console.log("Error in updateProviderProfile controller:", error);
-        
-        if (error.name === 'ValidationError') {
-             return res.status(400).json({
-                success: false,
-                message: error.message,
-            });
-        }
-        
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error: " + error.message,
-        });
+        console.error("Error in updateProviderProfile:", error.message);
+        // Mongoose validation errors will be caught here
+        return res.status(400).json({ success: false, message: error.message });
     }
 };
 
-const getProviderProfileById = async (req, res) => {
-    try {
-        const { id: providerUserId } = req.params; // Get the user ID from the URL
-        // console.log("Fetching profile for provider user ID:", providerUserId);
-        // 1. Find the provider's profile and populate their user details
-        const profile = await ProviderProfile.findOne({ _id: providerUserId })
-            .populate('user', 'name profileImage'); // Get user's name and image
+// --- Service Offering Controllers ---
 
+/**
+ * @description Add a new service offering to a provider's profile
+ * @route POST /api/provider-profile/service
+ * @access Private (Provider)
+ */
+ const addServiceOffering = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { serviceCategory, subCategories, keywords, description } = req.body;
+
+        // Ensure images are provided if this is a new service offering
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ success: false, message: "Portfolio images are required for a service." });
+        }
+        
+        const profile = await ProviderProfile.findOne({ user: userId });
         if (!profile) {
-            return res.status(404).json({
-                success: false,
-                message: "Provider not found."
-            });
+            return res.status(404).json({ success: false, message: "Provider profile not found." });
         }
 
-        // 2. Find all comments for this provider
-        // We also populate the 'customer' field to show who wrote the comment
-        // const comments = await Comment.find({ provider: providerUserId })
-        //     .populate('customer', 'name profileImage')
-        //     .sort({ createdAt: -1 }); 
-            // Show newest comments first
+        // 1. Upload images to Cloudinary
+        const uploadPromises = req.files.map(file => uploadBufferToCloudinary(file.buffer));
+        const portfolioImages = await Promise.all(uploadPromises); 
 
-        // 3. Send both the profile and the comments back
-        return res.status(200).json({
+        // 2. Create the service offering document
+        const newService = new ServiceOffering({
+            provider: profile._id,
+            serviceCategory,
+            // Ensure subCategories and keywords are arrays
+            subCategories: Array.isArray(subCategories) ? subCategories : (subCategories ? [subCategories] : []),
+            keywords: Array.isArray(keywords) ? keywords : (keywords ? [keywords] : []),
+            description,
+            portfolioImages
+        });
+        
+        // 3. Save the new service offering (triggers pre-save validation)
+        await newService.save();
+
+        return res.status(201).json({
             success: true,
-            message: "Profile fetched successfully.",
-            profile,
-            // comments
+            message: "Service added successfully.",
+            service: newService
         });
 
     } catch (error) {
-        console.log("Error in getProviderProfileById:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error: " + error.message,
-        });
+        console.error("Error in addServiceOffering:", error.message);
+        // This will catch Mongoose validation errors (like invalid subcategory/keyword)
+        return res.status(400).json({ success: false, message: error.message });
     }
 };
 
-const getAllProviders = async (req, res) => {
+/**
+ * @description Delete a service offering and its associated images
+ * @route DELETE /api/provider-profile/service/:serviceId
+ * @access Private (Provider)
+ */
+ const deleteServiceOffering = async (req, res) => {
     try {
-        // Find all provider profiles
-        // Then, populate the 'user' field with just the name and profileImage
-        const providers = await ProviderProfile.find({})
-            .populate('user', 'name profileImage');
+        const userId = req.user._id;
+        const { serviceId } = req.params;
 
-        return res.status(200).json({
-            success: true,
-            message: "All providers fetched successfully.",
-            providers
-        });
+        const profile = await ProviderProfile.findOne({ user: userId });
+        if (!profile) {
+            return res.status(404).json({ success: false, message: "Provider profile not found." });
+        }
 
+        const service = await ServiceOffering.findById(serviceId);
+        if (!service) {
+            return res.status(404).json({ success: false, message: "Service offering not found." });
+        }
+
+        // Verify ownership: only the provider who owns the service can delete it
+        if (service.provider.toString() !== profile._id.toString()) {
+            return res.status(403).json({ success: false, message: "You are not authorized to delete this service." });
+        }
+
+        // 1. Delete associated images from Cloudinary
+        const deletePromises = service.portfolioImages.map(img => deleteFromCloudinary(img.public_id));
+        await Promise.all(deletePromises);
+        
+        // 2. Delete the service offering from MongoDB
+        await ServiceOffering.findByIdAndDelete(serviceId);
+
+        return res.status(200).json({ success: true, message: "Service deleted successfully." });
+        
     } catch (error) {
-        console.log("Error in getAllProviders:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error: " + error.message,
-        });
+        console.error("Error in deleteServiceOffering:", error.message);
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
+/**
+ * @description Get all dashboard statistics for the logged-in provider
+ * @route GET /api/provider-profile/dashboard/stats
+ * @access Private (Provider)
+ */
 const getProviderDashboardStats = async (req, res) => {
     try {
         const providerUserId = req.user._id;
@@ -242,7 +213,7 @@ const getProviderDashboardStats = async (req, res) => {
 
         // 2. Get status counts and total bookings in one query
         const bookingStats = await Booking.aggregate([
-            { $match: { provider: providerProfileId } },
+            { $match: { provider: providerProfileId } }, // Match bookings for THIS provider
             { $group: { _id: "$status", count: { $sum: 1 } } }
         ]);
 
@@ -263,10 +234,10 @@ const getProviderDashboardStats = async (req, res) => {
             totalBookings += stat.count;
         });
 
-        // 3. Get 5 Recent Bookings
+        // 3. Get 5 Recent Bookings for this provider
         const recentBookings = await Booking.find({ provider: providerProfileId })
-            .populate('customer', 'name profileImage')
-            .sort({ createdAt: -1 })
+            .populate('customer', 'name profileImage') // Populate customer details
+            .sort({ createdAt: -1 }) // Sort by newest first
             .limit(5);
 
         // 4. Send the final response
@@ -285,5 +256,67 @@ const getProviderDashboardStats = async (req, res) => {
     }
 };
 
-// Make sure to export it
-export { becomeProvider, updateProviderProfile,getProviderProfileById,getAllProviders,getProviderDashboardStats };
+
+// --- Public Fetching Controllers ---
+
+/**
+ * @description Get all approved providers (for the public list page)
+ * @route GET /api/provider-profile/
+ * @access Public
+ */
+ const getAllProviders = async (req, res) => {
+    try {
+        // Find all provider profiles and populate their associated user and service offerings
+        const providers = await ProviderProfile.find()
+            .populate('user', 'name profileImage') // Get user's public info (name, profile image)
+            .populate('serviceOfferings'); // Get all their service offerings (with images, categories, etc.)
+        
+        return res.status(200).json({
+            success: true,
+            providers
+        });
+    } catch (error) {
+        console.error("Error in getAllProviders:", error.message);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
+/**
+ * @description Get one provider's full details by their PROFILE ID (for detail page)
+ * @route GET /api/provider-profile/:id
+ * @access Public
+ */
+const getProviderById = async (req, res) => {
+    try {
+        const provider = await ProviderProfile.findById(req.params.id)
+            .populate('user', 'name profileImage') // Get user's public info
+            .populate('serviceOfferings'); // Get all their service offerings
+
+        if (!provider) {
+            return res.status(404).json({ success: false, message: "Provider not found." });
+        }
+        
+        // TODO: You would also fetch and send comments here if they are linked to ProviderProfile
+        // const comments = await Comment.find({ provider: provider._id }).populate('customer').sort({ createdAt: -1 });
+        
+        return res.status(200).json({
+            success: true,
+            provider
+            // comments: comments // Uncomment if you add comment fetching
+        });
+    } catch (error) {
+        console.error("Error in getProviderById:", error.message);
+        return res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+};
+
+// --- Export all functions from this file ---
+export {
+    becomeProvider,
+    updateProviderProfile,
+    addServiceOffering,
+    deleteServiceOffering,
+    getProviderDashboardStats, // <-- This was the missing export!
+    getAllProviders,
+    getProviderById,
+};

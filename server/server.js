@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import providerProfileRouter from "./routes/providerProfile.route.js";
 import bookingRouter from "./routes/booking.route.js";
 import commentRouter from "./routes/comment.routes.js";
+import adminRouter from "./routes/admin.route.js";
 import cors from "cors";
 
 const app = express();
@@ -26,6 +27,7 @@ app.use('/api/user', userRouter);
 app.use('/api/provider-profile', providerProfileRouter);
 app.use('/api/bookings', bookingRouter);
 app.use('/api/comments', commentRouter);
+app.use('/api/admin',adminRouter)
 
 const port = process.env.PORT || 3000;
 
